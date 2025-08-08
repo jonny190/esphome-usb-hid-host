@@ -157,17 +157,15 @@ bool UsbHidKeyboardManager::find_keyboard_interface_and_ep_(const usb_config_des
       ESP_LOGD(TAG, "IFACE #%u class=%02X subclass=%02X proto=%02X",
                ifd->bInterfaceNumber, ifd->bInterfaceClass, ifd->bInterfaceSubClass, ifd->bInterfaceProtocol);
 
-      if (ifd->bInterfaceClass == USB_CLASS_HID &&
-          ifd->bInterfaceSubClass == HID_SUBCLASS_BOOT &&
-          ifd->bInterfaceProtocol == HID_PROTO_KEYBOARD) {
-
+      if (ifd->bInterfaceClass == USB_CLASS_HID) {
         if (usb_host_interface_claim(client_, dev_handle_, current_iface, 0) == ESP_OK) {
           interface_claimed_ = true;
-          ESP_LOGI(TAG, "Claimed HID keyboard interface %u", current_iface);
+          ESP_LOGI(TAG, "Claimed HID interface %u (class=%02X sub=%02X proto=%02X)",
+                  current_iface, ifd->bInterfaceClass, ifd->bInterfaceSubClass, ifd->bInterfaceProtocol);
         } else {
-          ESP_LOGE(TAG, "interface_claim failed");
+          ESP_LOGE(TAG, "interface_claim failed for iface %u", current_iface);
         }
-      }
+}
     } else if (hdr->bDescriptorType == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
       const usb_ep_desc_t *ep = (const usb_ep_desc_t *)p;
       bool is_in = (ep->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK) != 0;
