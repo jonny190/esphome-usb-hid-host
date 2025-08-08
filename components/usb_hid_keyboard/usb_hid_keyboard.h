@@ -3,9 +3,13 @@
 #include "esphome/components/text_sensor/text_sensor.h"
 #include <queue>
 #include <string>
+#include <vector>
 
 namespace esphome {
 namespace usb_hid_keyboard {
+
+// Forward-declare to avoid circular include
+class UsbHidKeyboardBinarySensor;
 
 class UsbHidKeyboardManager : public Component {
  public:
@@ -13,14 +17,12 @@ class UsbHidKeyboardManager : public Component {
   void loop() override;
   float get_setup_priority() const override { return setup_priority::HARDWARE; }
 
-  // Called by text_sensor platform to attach itself as an output
+  // Wiring from platforms
   void set_last_key_sensor(text_sensor::TextSensor *sensor) { last_key_sensor_ = sensor; }
+  void register_binary_sensor(UsbHidKeyboardBinarySensor *bs) { binary_sensors_.push_back(bs); }
 
-  // Hook for the USB ISR/task to enqueue decoded key strings
+  // Called by HID callback / poller when a key is decoded
   void enqueue_key(const std::string &key);
-
-  // Singleton-ish access if needed
-  static UsbHidKeyboardManager *instance();
 
  private:
   void init_usb_host_();
@@ -28,9 +30,7 @@ class UsbHidKeyboardManager : public Component {
 
   text_sensor::TextSensor *last_key_sensor_{nullptr};
   std::queue<std::string> key_queue_;
-
-  // TODO: Add your USB host handles / HID driver state here
-  // e.g. usb_host_client_handle_t client_handle_;
+  std::vector<UsbHidKeyboardBinarySensor *> binary_sensors_;
 };
 
 }  // namespace usb_hid_keyboard
