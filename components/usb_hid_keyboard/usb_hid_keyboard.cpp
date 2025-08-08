@@ -1,4 +1,4 @@
-#include "usb_hid_keyboard.h"
+#include "esphome/components/usb_hid_keyboard/usb_hid_keyboard.h"
 #include "esphome/core/log.h"
 
 static const char *const TAG = "usb_hid_keyboard";

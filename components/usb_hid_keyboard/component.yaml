@@ -3,7 +3,7 @@ domain: "usb_hid_keyboard"
 version: 0.1.0
 
 build:
-  include:
+  includes:
     - usb_hid_keyboard.h
     - text_sensor/usb_hid_keyboard_text_sensor.h
     - binary_sensor/usb_hid_keyboard_binary_sensor.h
