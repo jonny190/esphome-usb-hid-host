@@ -21,8 +21,12 @@ void UsbHidKeyboardManager::setup() {
 }
 
 void UsbHidKeyboardManager::loop() {
+  // NEW: tick the library
+  uint32_t lib_flags = 0;
+  (void) usb_host_lib_handle_events(0, &lib_flags);
+  
   if (client_) {
-    usb_host_client_handle_events(client_, 0);
+    (void) usb_host_client_handle_events(client_, 0);
   }
 
   while (!key_queue_.empty()) {
@@ -45,33 +49,50 @@ void UsbHidKeyboardManager::init_usb_host_() {
     ESP_LOGE(TAG, "usb_host_install failed");
     return;
   }
+
+    (void) usb_host_lib_set_root_port_power(true);
+
   host_installed_ = true;
 
-  usb_host_client_config_t client_cfg = {
-      .is_synchronous = false,
-      .max_num_event_msg = 10,
-      .async = {
-          .event_cb = [](const usb_host_client_event_msg_t *event_msg, void *arg) {
-            auto *self = static_cast<UsbHidKeyboardManager *>(arg);
-            if (!self) return;
-            switch (event_msg->event) {
-              case USB_HOST_CLIENT_EVENT_NEW_DEV:
-                self->open_target_device_(TARGET_VID, TARGET_PID, event_msg->new_dev.addr);
-                break;
-              case USB_HOST_CLIENT_EVENT_DEV_GONE:
-                if (self->dev_handle_) {
-                  self->dev_handle_ = nullptr;
-                  self->device_open_ = false;
-                  self->interface_claimed_ = false;
-                }
-                break;
-              default:
-                break;
+usb_host_client_config_t client_cfg = {
+    .is_synchronous = false,
+    .max_num_event_msg = 10,
+    .async = {
+        .client_event_callback = [](const usb_host_client_event_msg_t *event_msg, void *arg) {
+          auto *self = static_cast<UsbHidKeyboardManager *>(arg);
+          if (!self) return;
+
+          switch (event_msg->event) {
+            case USB_HOST_CLIENT_EVENT_NEW_DEV: {
+              // Address field is 'address' in your headers
+              uint8_t addr = event_msg->new_dev.address;
+              self->open_target_device_(TARGET_VID, TARGET_PID, addr);
+              break;
             }
-          },
-          .arg = this,
-      },
-  };
+            case USB_HOST_CLIENT_EVENT_DEV_GONE: {
+              // Tidy up transfers/handles if our device went away
+              if (self->xfer_in_) {
+                usb_host_transfer_free(self->xfer_in_);
+                self->xfer_in_ = nullptr;
+              }
+              if (self->device_open_ && self->dev_handle_) {
+                // (If you claimed interfaces, you could release them here)
+                usb_host_device_close(self->client_, self->dev_handle_);
+              }
+              self->dev_handle_ = nullptr;
+              self->device_open_ = false;
+              self->interface_claimed_ = false;
+              self->ep_in_addr_ = 0;
+              self->max_packet_size_ = 0;
+              break;
+            }
+            default:
+              break;
+          }
+        },
+        .callback_arg = this,
+    },
+};
 
   if (usb_host_client_register(&client_cfg, &client_) != ESP_OK) {
     ESP_LOGE(TAG, "usb_host_client_register failed");
@@ -88,13 +109,16 @@ bool UsbHidKeyboardManager::open_target_device_(uint16_t vid, uint16_t pid, uint
     return false;
   }
 
+  // Get the cached device descriptor
   const usb_device_desc_t *dd = nullptr;
-  usb_host_device_info_t info{};
-  if (usb_host_device_get_info(dev, &info) == ESP_OK) dd = info.dev_desc;
+  if (usb_host_get_device_descriptor(dev, &dd) != ESP_OK || !dd) {
+    ESP_LOGW(TAG, "get_device_descriptor failed");
+    usb_host_device_close(client_, dev);
+    return false;
+  }
 
-  if (!dd || dd->idVendor != vid || dd->idProduct != pid) {
-    ESP_LOGI(TAG, "addr %u is %04X:%04X (not our target)", addr,
-             dd ? dd->idVendor : 0, dd ? dd->idProduct : 0);
+  if (dd->idVendor != vid || dd->idProduct != pid) {
+    ESP_LOGI(TAG, "addr %u is %04X:%04X (not our target)", addr, dd->idVendor, dd->idProduct);
     usb_host_device_close(client_, dev);
     return false;
   }
