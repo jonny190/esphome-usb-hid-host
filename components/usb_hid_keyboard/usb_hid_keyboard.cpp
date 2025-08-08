@@ -96,12 +96,6 @@ void UsbHidKeyboardManager::init_usb_host_() {
   ESP_LOGI(TAG, "USB host client registered");
 }
 
-  if (usb_host_client_register(&client_cfg, &client_) != ESP_OK) {
-    ESP_LOGE(TAG, "usb_host_client_register failed");
-    return;
-  }
-}
-
 bool UsbHidKeyboardManager::open_target_device_(uint16_t vid, uint16_t pid, uint8_t addr) {
   if (device_open_) return true;
 
