@@ -6,7 +6,6 @@
 #include <vector>
 #include <cstdint>
 
-// IDF USB host headers
 #include "usb/usb_host.h"
 
 namespace esphome {
@@ -29,30 +28,25 @@ class UsbHidKeyboardManager : public Component {
   void init_usb_host_();
   void poll_usb_();
 
-  // --- USB host state ---
   usb_host_client_handle_t client_{nullptr};
   usb_device_handle_t dev_handle_{nullptr};
   bool host_installed_{false};
   bool device_open_{false};
   bool interface_claimed_{false};
 
-  // Interrupt IN endpoint
   uint8_t ep_in_addr_{0};
   usb_transfer_t *xfer_in_{nullptr};
   uint16_t max_packet_size_{0};
 
-  // --- App plumbing ---
   text_sensor::TextSensor *last_key_sensor_{nullptr};
   std::queue<std::string> key_queue_;
   std::vector<UsbHidKeyboardBinarySensor *> binary_sensors_;
 
-  // Helpers
-  bool open_target_device_(uint16_t vid, uint16_t pid);
+  bool open_target_device_(uint16_t vid, uint16_t pid, uint8_t addr);
   bool find_keyboard_interface_and_ep_(const usb_config_desc_t *cfg);
   void submit_next_in_();
   void handle_report_(const uint8_t *data, int len);
 
-  // Static trampoline for transfer callback
   static void xfer_cb_(usb_transfer_t *transfer);
 };
 

@@ -1,15 +1,13 @@
 #include "esphome/components/usb_hid_keyboard/usb_hid_keyboard.h"
 #include "esphome/components/usb_hid_keyboard/binary_sensor/usb_hid_keyboard_binary_sensor.h"
 #include "esphome/core/log.h"
-#include "esphome/core/hal.h"  // esphome::millis()
+#include "esphome/core/hal.h"
 
 static const char *const TAG = "usb_hid_keyboard";
 
-// Your keyboard from logs: vid 0x1532 pid 0x023F
 #define TARGET_VID 0x1532
 #define TARGET_PID 0x023F
 
-// HID constants
 #define USB_CLASS_HID      0x03
 #define HID_SUBCLASS_BOOT  0x01
 #define HID_PROTO_KEYBOARD 0x01
@@ -17,21 +15,16 @@ static const char *const TAG = "usb_hid_keyboard";
 namespace esphome {
 namespace usb_hid_keyboard {
 
-static UsbHidKeyboardManager *g_mgr = nullptr;
-
 void UsbHidKeyboardManager::setup() {
-  g_mgr = this;
   ESP_LOGI(TAG, "Setting up USB HID Keyboard Manager");
   init_usb_host_();
 }
 
 void UsbHidKeyboardManager::loop() {
-  // Service host client events (nonblocking)
   if (client_) {
-    usb_host_client_handle_events(client_, 0);  // 0 = no wait
+    usb_host_client_handle_events(client_, 0);
   }
 
-  // Publish queued keys
   while (!key_queue_.empty()) {
     auto k = key_queue_.front();
     key_queue_.pop();
@@ -45,9 +38,8 @@ void UsbHidKeyboardManager::enqueue_key(const std::string &key) {
 }
 
 void UsbHidKeyboardManager::init_usb_host_() {
-  // 1) Install host
   usb_host_config_t host_cfg = {
-      .intr_flags = ESP_INTR_FLAG_LEVEL1,  // safe default
+      .intr_flags = ESP_INTR_FLAG_LEVEL1,
   };
   if (usb_host_install(&host_cfg) != ESP_OK) {
     ESP_LOGE(TAG, "usb_host_install failed");
@@ -55,91 +47,80 @@ void UsbHidKeyboardManager::init_usb_host_() {
   }
   host_installed_ = true;
 
-  // 2) Register a client (us)
   usb_host_client_config_t client_cfg = {
       .is_synchronous = false,
       .max_num_event_msg = 10,
-      .async = {.callback = [](const usb_host_client_event_msg_t *event_msg, void *) {
-        // Basic attach/detach events
-        switch (event_msg->event) {
-          case USB_HOST_CLIENT_EVENT_NEW_DEV:
-            ESP_LOGI(TAG, "USB: NEW_DEV");
-            // Nothing to do here; we'll open in poll by scanning
-            break;
-          case USB_HOST_CLIENT_EVENT_DEV_GONE:
-            ESP_LOGI(TAG, "USB: DEV_GONE");
-            // Device disappeared
-            break;
-          default:
-            break;
-        }
+      .async = {
+          .event_cb = [](const usb_host_client_event_msg_t *event_msg, void *arg) {
+            auto *self = static_cast<UsbHidKeyboardManager *>(arg);
+            if (!self) return;
+            switch (event_msg->event) {
+              case USB_HOST_CLIENT_EVENT_NEW_DEV:
+                self->open_target_device_(TARGET_VID, TARGET_PID, event_msg->new_dev.addr);
+                break;
+              case USB_HOST_CLIENT_EVENT_DEV_GONE:
+                if (self->dev_handle_) {
+                  self->dev_handle_ = nullptr;
+                  self->device_open_ = false;
+                  self->interface_claimed_ = false;
+                }
+                break;
+              default:
+                break;
+            }
+          },
+          .arg = this,
       },
-      .arg = nullptr},
   };
 
   if (usb_host_client_register(&client_cfg, &client_) != ESP_OK) {
     ESP_LOGE(TAG, "usb_host_client_register failed");
     return;
   }
-
-  // 3) Try to open our target device now (if already present)
-  open_target_device_(TARGET_VID, TARGET_PID);
 }
 
-bool UsbHidKeyboardManager::open_target_device_(uint16_t vid, uint16_t pid) {
+bool UsbHidKeyboardManager::open_target_device_(uint16_t vid, uint16_t pid, uint8_t addr) {
   if (device_open_) return true;
 
-  // Enumerate known devices, try open the first matching VID/PID
-  usb_host_device_handle_t devs[8];
-  int num = 0;
-  if (usb_host_device_get_all(devs, 8, &num) != ESP_OK) {
-    ESP_LOGW(TAG, "device_get_all failed");
+  usb_device_handle_t dev{};
+  if (usb_host_device_open(client_, addr, &dev) != ESP_OK) {
+    ESP_LOGW(TAG, "open addr %u failed", addr);
     return false;
   }
 
-  for (int i = 0; i < num; i++) {
-    usb_device_handle_t dev;
-    if (usb_host_device_open(client_, devs[i].dev_addr, &dev) != ESP_OK) continue;
+  const usb_device_desc_t *dd = nullptr;
+  usb_host_device_info_t info{};
+  if (usb_host_device_get_info(dev, &info) == ESP_OK) dd = info.dev_desc;
 
-    const usb_device_desc_t *dd = nullptr;
-    usb_host_device_info_t info;
-    if (usb_host_device_get_info(dev, &info) == ESP_OK) dd = info.dev_desc;
-
-    if (dd && dd->idVendor == vid && dd->idProduct == pid) {
-      ESP_LOGI(TAG, "Opened target device %04X:%04X", vid, pid);
-      dev_handle_ = dev;
-      device_open_ = true;
-
-      // Get active config
-      const usb_config_desc_t *cfg = nullptr;
-      if (usb_host_get_active_config_descriptor(dev_handle_, &cfg) != ESP_OK || !cfg) {
-        ESP_LOGE(TAG, "get_active_config_descriptor failed");
-        return false;
-      }
-
-      if (!find_keyboard_interface_and_ep_(cfg)) {
-        ESP_LOGE(TAG, "No HID keyboard interface found");
-        return false;
-      }
-
-      // Allocate first IN transfer and kick it off
-      submit_next_in_();
-      return true;
-    }
-
-    // Not our target; close it
+  if (!dd || dd->idVendor != vid || dd->idProduct != pid) {
+    ESP_LOGI(TAG, "addr %u is %04X:%04X (not our target)", addr,
+             dd ? dd->idVendor : 0, dd ? dd->idProduct : 0);
     usb_host_device_close(client_, dev);
+    return false;
   }
 
-  // Not found yet
-  return false;
+  ESP_LOGI(TAG, "Opened %04X:%04X at addr %u", vid, pid, addr);
+  dev_handle_ = dev;
+  device_open_ = true;
+
+  const usb_config_desc_t *cfg = nullptr;
+  if (usb_host_get_active_config_descriptor(dev_handle_, &cfg) != ESP_OK || !cfg) {
+    ESP_LOGE(TAG, "active config desc failed");
+    return false;
+  }
+
+  if (!find_keyboard_interface_and_ep_(cfg)) {
+    ESP_LOGE(TAG, "No HID keyboard interface found");
+    return false;
+  }
+
+  submit_next_in_();
+  return true;
 }
 
 bool UsbHidKeyboardManager::find_keyboard_interface_and_ep_(const usb_config_desc_t *cfg) {
-  // Walk config->interfaces->endpoints to find HID keyboard + IN interrupt endpoint
   const uint8_t *p = (const uint8_t *)cfg;
   const uint8_t *end = p + cfg->wTotalLength;
-
   uint8_t current_iface = 0xFF;
 
   while (p < end) {
@@ -151,11 +132,12 @@ bool UsbHidKeyboardManager::find_keyboard_interface_and_ep_(const usb_config_des
       current_iface = ifd->bInterfaceNumber;
       ESP_LOGD(TAG, "IFACE #%u class=%02X subclass=%02X proto=%02X",
                ifd->bInterfaceNumber, ifd->bInterfaceClass, ifd->bInterfaceSubClass, ifd->bInterfaceProtocol);
+
       if (ifd->bInterfaceClass == USB_CLASS_HID &&
           ifd->bInterfaceSubClass == HID_SUBCLASS_BOOT &&
           ifd->bInterfaceProtocol == HID_PROTO_KEYBOARD) {
-        // claim it
-        if (usb_host_interface_claim(dev_handle_, 0 /*cfg idx*/, current_iface, 0 /*alt setting*/) == ESP_OK) {
+
+        if (usb_host_interface_claim(client_, dev_handle_, current_iface, 0) == ESP_OK) {
           interface_claimed_ = true;
           ESP_LOGI(TAG, "Claimed HID keyboard interface %u", current_iface);
         } else {
@@ -163,7 +145,7 @@ bool UsbHidKeyboardManager::find_keyboard_interface_and_ep_(const usb_config_des
         }
       }
     } else if (hdr->bDescriptorType == USB_B_DESCRIPTOR_TYPE_ENDPOINT) {
-      const usb_endpoint_desc_t *ep = (const usb_endpoint_desc_t *)p;
+      const usb_ep_desc_t *ep = (const usb_ep_desc_t *)p;
       bool is_in = (ep->bEndpointAddress & USB_B_ENDPOINT_ADDRESS_EP_DIR_MASK) != 0;
       bool is_int = (ep->bmAttributes & USB_BM_ATTRIBUTES_XFERTYPE_MASK) == USB_BM_ATTRIBUTES_XFER_INT;
       if (interface_claimed_ && is_in && is_int) {
@@ -201,7 +183,6 @@ void UsbHidKeyboardManager::submit_next_in_() {
   }
 }
 
-// static
 void UsbHidKeyboardManager::xfer_cb_(usb_transfer_t *transfer) {
   auto *self = static_cast<UsbHidKeyboardManager *>(transfer->context);
   if (!self) return;
@@ -212,44 +193,34 @@ void UsbHidKeyboardManager::xfer_cb_(usb_transfer_t *transfer) {
     ESP_LOGV(TAG, "IN xfer status=%d", (int)transfer->status);
   }
 
-  // Re-submit for the next report
   self->submit_next_in_();
 }
 
 static char map_hid_usage_to_char(uint8_t usage, bool shifted) {
-  // A..Z
   if (usage >= 0x04 && usage <= 0x1D) {
     char c = 'a' + (usage - 0x04);
     return shifted ? (char)('A' + (usage - 0x04)) : c;
   }
-  // 1..0 (HID 0x1E..0x27)
   if (usage >= 0x1E && usage <= 0x27) {
     const char *base = shifted ? "!@#$%^&*()" : "1234567890";
     return base[usage - 0x1E];
   }
-  if (usage == 0x2C) return ' '; // SPACE
+  if (usage == 0x2C) return ' ';
   return 0;
 }
 
 void UsbHidKeyboardManager::handle_report_(const uint8_t *data, int len) {
-  // Boot keyboard report: 8 bytes: [mods][reserved][6 keys...]
   if (len < 8 || !data) return;
-  uint8_t mods = data[0];
-  bool shifted = (mods & 0x22) || (mods & 0x02) || (mods & 0x20); // either L/R SHIFT bits (0x02,0x20)
+  bool shifted = (data[0] & 0x22) != 0;  // LSHIFT/RSHIFT
 
-  // Emit first nonzero key in the 6 slots (very naive)
   for (int i = 2; i < 8; i++) {
     uint8_t usage = data[i];
     if (!usage) continue;
 
-    if (usage == 0x28) { enqueue_key("ENTER"); return; }  // Enter
+    if (usage == 0x28) { enqueue_key("ENTER"); return; }
     char ch = map_hid_usage_to_char(usage, shifted);
-    if (ch) {
-      std::string s(1, ch);
-      enqueue_key(s);
-      return;
-    }
-    // Otherwise, publish hex code e.g. "0x2A" for Backspace etc.
+    if (ch) { std::string s(1, ch); enqueue_key(s); return; }
+
     char buf[8];
     snprintf(buf, sizeof(buf), "0x%02X", usage);
     enqueue_key(buf);

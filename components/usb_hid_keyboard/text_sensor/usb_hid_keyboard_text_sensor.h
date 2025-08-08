@@ -5,7 +5,6 @@
 namespace esphome {
 namespace usb_hid_keyboard {
 
-// Simple text sensor; the manager publishes into it.
 class UsbHidKeyboardTextSensor : public text_sensor::TextSensor, public Component {
  public:
   void setup() override {}
