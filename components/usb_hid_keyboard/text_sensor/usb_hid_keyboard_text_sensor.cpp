@@ -1,6 +1,5 @@
 #include "esphome/components/usb_hid_keyboard/usb_hid_keyboard.h"
 #include "esphome/core/log.h"
-#include "binary_sensor/usb_hid_keyboard_binary_sensor.h"
 
 static const char *const TAG = "usb_hid_keyboard";
 
