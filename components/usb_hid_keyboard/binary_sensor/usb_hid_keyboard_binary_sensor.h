@@ -9,15 +9,13 @@ class UsbHidKeyboardBinarySensor : public binary_sensor::BinarySensor, public Co
  public:
   void setup() override {}
   void loop() override;
-  float get_setup_priority() const override { return setup_priority::DATA; }
 
-  // Called by manager when any key arrives
   void on_key_pulse();
 
  protected:
   bool pending_pulse_{false};
   uint32_t pulse_start_ms_{0};
-  uint32_t pulse_len_ms_{50};  // default 50ms ON
+  uint32_t pulse_len_ms_{50};
 };
 
 }  // namespace usb_hid_keyboard
