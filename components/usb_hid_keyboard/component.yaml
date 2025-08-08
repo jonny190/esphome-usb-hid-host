@@ -2,18 +2,17 @@ name: "USB HID Keyboard Host"
 domain: "usb_hid_keyboard"
 version: 0.1.0
 
-# Keep this simple; ESPHome will compile these files into your firmware.
 build:
   include:
     - usb_hid_keyboard.h
     - text_sensor/usb_hid_keyboard_text_sensor.h
+    - binary_sensor/usb_hid_keyboard_binary_sensor.h
   src:
     - usb_hid_keyboard.cpp
     - text_sensor/usb_hid_keyboard_text_sensor.cpp
+    - binary_sensor/usb_hid_keyboard_binary_sensor.cpp
 
-# Limit to ESP32 for now (S3 intended)
 platforms:
   - espressif32
 
-# Optional metadata
 license: "MIT"
