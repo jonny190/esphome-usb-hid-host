@@ -1,5 +1,5 @@
 #include "usb_hid_keyboard_binary_sensor.h"
-#include "esphhome/core/helpers.h"
+#include "esphome/core/helpers.h"
 
 namespace esphome {
 namespace usb_hid_keyboard {
