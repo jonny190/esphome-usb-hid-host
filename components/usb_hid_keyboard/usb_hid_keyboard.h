@@ -28,6 +28,12 @@ class UsbHidKeyboardManager : public Component {
   void init_usb_host_();
   void poll_usb_();
 
+  // --- add in private: ---
+  uint8_t claimed_iface_{0xFF};
+
+   bool hid_set_boot_protocol_(uint8_t iface);
+   bool hid_set_idle_(uint8_t iface, uint8_t duration = 0, uint8_t report_id = 0);
+
   usb_host_client_handle_t client_{nullptr};
   usb_device_handle_t dev_handle_{nullptr};
   bool host_installed_{false};
