@@ -26,32 +26,39 @@ class UsbHidKeyboardManager : public Component {
 
  private:
   void init_usb_host_();
-  void poll_usb_();
 
-  // --- add in private: ---
-  uint8_t claimed_iface_{0xFF};
+  // ---- Deferred open/config state ----
+  uint8_t  pending_addr_{0};          // set on NEW_DEV; opened later in loop()
+  uint32_t pending_addr_at_ms_{0};
+  bool     configured_{false};        // after SET_PROTOCOL/SET_IDLE
 
-   bool hid_set_boot_protocol_(uint8_t iface);
-   bool hid_set_idle_(uint8_t iface, uint8_t duration = 0, uint8_t report_id = 0);
-
+  // ---- HID host runtime ----
   usb_host_client_handle_t client_{nullptr};
-  usb_device_handle_t dev_handle_{nullptr};
+  usb_device_handle_t      dev_handle_{nullptr};
   bool host_installed_{false};
   bool device_open_{false};
   bool interface_claimed_{false};
 
-  uint8_t ep_in_addr_{0};
+  uint8_t       claimed_iface_{0xFF};
+  uint8_t       ep_in_addr_{0};
   usb_transfer_t *xfer_in_{nullptr};
-  uint16_t max_packet_size_{0};
+  uint16_t      max_packet_size_{0};
 
   text_sensor::TextSensor *last_key_sensor_{nullptr};
   std::queue<std::string> key_queue_;
   std::vector<UsbHidKeyboardBinarySensor *> binary_sensors_;
 
+  // ---- Flow helpers ----
   bool open_target_device_(uint16_t vid, uint16_t pid, uint8_t addr);
   bool find_keyboard_interface_and_ep_(const usb_config_desc_t *cfg);
   void submit_next_in_();
   void handle_report_(const uint8_t *data, int len);
+
+  // ---- Non-blocking HID class requests ----
+  bool hid_set_boot_protocol_(uint8_t iface);
+  bool hid_set_idle_(uint8_t iface, uint8_t duration = 0, uint8_t report_id = 0);
+  // Optional: test output LEDs of “keyboard-like” devices
+  bool hid_set_leds_(uint8_t iface, uint8_t leds_mask); // 1=Num, 2=Caps, 4=Scroll
 
   static void xfer_cb_(usb_transfer_t *transfer);
 };
